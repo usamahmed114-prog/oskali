@@ -105,6 +105,10 @@
                     <i data-feather="users"></i>
                     Students
                 </a>
+                <a href="#" data-view="teachers" class="nav-item">
+                    <i data-feather="briefcase"></i>
+                    Teachers
+                </a>
                 <a href="#" data-view="fees" class="nav-item">
                     <i data-feather="dollar-sign"></i>
                     Fees
@@ -159,11 +163,14 @@
 
                 <div class="user-profile">
                     <!-- Cloud Sync Status -->
-                    <div id="sync-status"
-                        style="margin-right: 1rem; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: #f0fdf4; border-radius: 20px;">
+                    <div id="sync-status" onclick="Store.syncToCloud(); App.showToast('Manual sync triggered...')"
+                        style="margin-right: 1rem; display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; background: #f0fdf4; border-radius: 20px; cursor: pointer;"
+                        title="Click to sync now">
                         <div id="sync-indicator"
                             style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></div>
                         <span id="sync-text" style="font-size: 0.75rem; color: #059669; font-weight: 500;">Synced</span>
+                        <i data-feather="refresh-cw"
+                            style="width: 12px; height: 12px; color: #059669; margin-left: 4px;"></i>
                     </div>
 
                     <div class="avatar-circle">M</div>
@@ -191,10 +198,19 @@
             </div>
             <form id="add-student-form">
                 <div class="flex gap-4 mb-4">
-                    <div style="flex:1;">
+                    <div style="flex:2;">
                         <label class="block text-sm font-medium mb-1">Full Name</label>
                         <input type="text" name="fullName" class="form-input" required>
                     </div>
+                    <div style="flex:1;">
+                        <label class="block text-sm font-medium mb-1">Gender</label>
+                        <select name="gender" class="form-input">
+                            <option>Male</option>
+                            <option>Female</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-4 mb-4">
                     <div style="flex:1;">
                         <label class="block text-sm font-medium mb-1">Grade</label>
                         <select name="grade" class="form-input">
@@ -241,10 +257,19 @@
             <form id="edit-student-form">
                 <input type="hidden" name="id" id="edit-id">
                 <div class="flex gap-4 mb-4">
-                    <div style="flex:1;">
+                    <div style="flex:2;">
                         <label class="block text-sm font-medium mb-1">Full Name</label>
                         <input type="text" name="fullName" id="edit-fullName" class="form-input" required>
                     </div>
+                    <div style="flex:1;">
+                        <label class="block text-sm font-medium mb-1">Gender</label>
+                        <select name="gender" id="edit-gender" class="form-input">
+                            <option>Male</option>
+                            <option>Female</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-4 mb-4">
                     <div style="flex:1;">
                         <label class="block text-sm font-medium mb-1">Grade</label>
                         <select name="grade" id="edit-grade" class="form-input">
@@ -275,6 +300,58 @@
                         id="cancel-edit-student">Cancel</button>
                     <button type="submit" class="btn btn-primary" style="background: var(--color-sidebar-bg);">Update
                         Student</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Add Teacher Modal -->
+    <div id="add-teacher-modal" class="modal-overlay hidden">
+        <div class="modal-content animate-fade-in">
+            <div class="flex justify-between items-center mb-6">
+                <h3 class="text-xl font-bold" style="color: var(--color-primary-text);">New Teacher</h3>
+                <button id="close-add-teacher" style="background:none; border:none; cursor:pointer; color:#9ca3af;"><i
+                        data-feather="x"></i></button>
+            </div>
+            <form id="add-teacher-form">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Full Name</label>
+                    <input type="text" name="name" class="form-input" required>
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Phone Number</label>
+                    <input type="tel" name="phone" class="form-input" required>
+                </div>
+                <div class="flex gap-4 mb-6">
+                    <div style="flex:1;">
+                        <label class="block text-sm font-medium mb-1">Gender</label>
+                        <select name="gender" class="form-input">
+                            <option>Male</option>
+                            <option>Female</option>
+                        </select>
+                    </div>
+                    <div style="flex:1;">
+                        <label class="block text-sm font-medium mb-1">Subject</label>
+                        <select name="subject" class="form-input">
+                            <option>Mathematics</option>
+                            <option>Science</option>
+                            <option>English</option>
+                            <option>Somali</option>
+                            <option>Arabic</option>
+                            <option>Islamic Studies</option>
+                            <option>Social Studies</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="mb-6">
+                    <label class="block text-sm font-medium mb-1">Salary ($)</label>
+                    <input type="number" name="salary" class="form-input" value="0.00" step="0.01">
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" class="btn" style="background:#f3f4f6; color:#4b5563;"
+                        id="cancel-add-teacher">Cancel</button>
+                    <button type="submit" class="btn btn-primary" style="background: var(--color-sidebar-bg);">Save
+                        Teacher</button>
                 </div>
             </form>
         </div>

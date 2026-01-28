@@ -1,11 +1,12 @@
 const Store = {
     state: {
         students: [],
+        teachers: [],
         fees: [],
         attendance: [],
         auditLogs: [],
         settings: {
-            principalName: 'maxamed maxamed abdi',
+            principalName: 'abdulahi abdi',
             headTeachers: {
                 "Form 1": "Mr. Ahmed Nur",
                 "Form 2": "Ms. Fatima Farah",
@@ -34,24 +35,63 @@ const Store = {
         academicYears: ["2025-2026", "2026-2027"],
         currentYear: "2025-2026",
         exams: [],
-        dataVersion: 7
+        dataVersion: 8,
+        lastUpdated: 0 // Used for robust conflict resolution
     },
 
-    init() {
+    async init() {
         this.loadFromStorage();
-        // Force re-seed for new version with expanded fields
-        if (this.state.students.length < 50 || !this.state.dataVersion || this.state.dataVersion < 4) {
-            this.state.students = [];
-            this.state.fees = [];
-            this.state.attendance = [];
-            this.state.auditLogs = [];
-            this.seedData();
+
+        // Proactive Firebase Auth Listener
+        // This ensures sync starts IMMEDIATELY when the user is confirmed,
+        // solving cross-device and timing issues.
+        if (window.firebaseAuth) {
+            window.firebaseAuth.onAuthStateChanged((user) => {
+                if (user) {
+                    console.log('👤 User authenticated:', user.email);
+                    this.initCloudSync();
+                } else {
+                    console.log('👤 No user authenticated');
+                    if (this.unsubscribe) this.unsubscribe();
+                    this.updateSyncStatus('offline');
+                }
+            });
         }
 
-        // Initialize cloud sync if user is authenticated
-        if (window.firebaseAuth && window.firebaseAuth.currentUser) {
-            this.initCloudSync();
+        // Force re-seed if it's currently demo data OR empty
+        const isDemo = this.state.settings && this.state.settings.principalName === 'maxamed maxamed abdi';
+        if (this.state.students.length < 50 || !this.state.dataVersion || this.state.dataVersion < 4 || isDemo) {
+            console.log('🔄 Checking for local data recovery file...');
+            const recovered = await this.loadRecoveredData();
+            if (!recovered && this.state.students.length < 50) {
+                this.seedData();
+            }
         }
+    },
+
+    async loadRecoveredData() {
+        try {
+            // Add a timeout to the fetch call
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 3000); // 3-second timeout
+
+            const response = await fetch('al-huda-data.json', { signal: controller.signal });
+            clearTimeout(timeoutId);
+
+            if (response.ok) {
+                const data = await response.json();
+                if (data && data.students && data.students.length > 0) {
+                    this.state = { ...this.state, ...data, lastUpdated: 1 };
+                    this.saveToStorage(false);
+                    this.logAction('System', 'Data restored from local JSON file');
+                    console.log('✅ Recovered data loaded successfully');
+                    return true;
+                }
+            }
+        } catch (e) {
+            console.log('ℹ️ Initialization: Local JSON recovery skipped or timed out.');
+        }
+        return false;
     },
 
     loadFromStorage() {
@@ -74,31 +114,40 @@ const Store = {
         const userId = window.firebaseAuth.currentUser.uid;
         const docRef = window.firebaseDB.collection('schools').doc(userId);
 
+        // Prevent multiple listeners
+        if (this.unsubscribe) this.unsubscribe();
+
+        console.log('📡 Starting Real-time Cloud Sync...');
+        this.updateSyncStatus('syncing');
+
         // Set up real-time listener
         this.unsubscribe = docRef.onSnapshot((doc) => {
             if (doc.exists) {
                 const cloudData = doc.data();
-                // Prevent infinite loop: Only update and save to localStorage 
-                // if the cloud data is actually different from current state
-                const cloudDataStr = JSON.stringify(cloudData);
-                const localDataStr = JSON.stringify(this.state);
+                const cloudTime = cloudData.lastUpdated || 0;
+                const localTime = this.state.lastUpdated || 0;
 
-                if (cloudDataStr !== localDataStr) {
+                // Sync Logic: Newer Timestamp ALWAYS Wins
+                if (cloudTime > localTime) {
+                    console.log('✅ Newer data found in Cloud (at ' + new Date(cloudTime).toLocaleTimeString() + '). Syncing down...');
                     this.state = { ...this.state, ...cloudData };
                     localStorage.setItem('dugsiga_data', JSON.stringify(this.state));
-
-                    // Dispatch event for UI updates
                     window.dispatchEvent(new CustomEvent('state-updated'));
-                    console.log('✅ Data synced from cloud');
+                } else if (cloudTime < localTime && localTime > 1) {
+                    console.log('⬆️ Local data is newer (' + new Date(localTime).toLocaleTimeString() + '). Pushing to Cloud...');
+                    this.syncToCloud();
                 }
                 this.updateSyncStatus('synced');
             } else {
-                // First time - upload local data to cloud
-                console.log('☁️ Initial cloud sync...');
+                // First time setup for this specific user account
+                console.log('☁️ Creating initial Cloud Master record for this account...');
                 this.syncToCloud();
             }
         }, (error) => {
             console.error('❌ Sync error:', error);
+            if (error.code === 'permission-denied') {
+                console.error('⚠️ SECURITY ERROR: Please ensure your user account is authorized.');
+            }
             this.updateSyncStatus('error');
         });
     },
@@ -133,17 +182,19 @@ const Store = {
         if (!indicator || !text || !container) return;
 
         switch (status) {
-            case 'synced':
-                indicator.style.background = '#10b981';
-                text.textContent = 'Synced';
-                text.style.color = '#059669';
-                container.style.background = '#f0fdf4';
-                break;
             case 'syncing':
                 indicator.style.background = '#f59e0b';
                 text.textContent = 'Syncing...';
                 text.style.color = '#d97706';
                 container.style.background = '#fffbeb';
+                container.classList.add('sync-active');
+                break;
+            case 'synced':
+                indicator.style.background = '#10b981';
+                text.textContent = 'Synced';
+                text.style.color = '#059669';
+                container.style.background = '#f0fdf4';
+                container.classList.remove('sync-active');
                 break;
             case 'offline':
                 indicator.style.background = '#6b7280';
@@ -160,12 +211,15 @@ const Store = {
         }
     },
 
-    saveToStorage() {
+    saveToStorage(shouldSync = true) {
+        // Update timestamp before saving
+        this.state.lastUpdated = Date.now();
+
         localStorage.setItem('dugsiga_data', JSON.stringify(this.state));
-        console.log('💾 Data saved to localStorage');
+        console.log('💾 Data saved to localStorage (v' + this.state.dataVersion + ')');
 
         // Also sync to cloud if authenticated
-        if (window.firebaseAuth && window.firebaseAuth.currentUser) {
+        if (shouldSync && window.firebaseAuth && window.firebaseAuth.currentUser) {
             this.syncToCloud();
         }
 
@@ -242,6 +296,8 @@ const Store = {
             section: student.section || 'A',
             dorm: student.dorm || 'Dorm 1',
             isFree: student.isFree || false,
+            gender: student.gender || 'Male',
+            status: 'Active',
             performanceRemarks: '',
             ...student
         };
@@ -270,7 +326,7 @@ const Store = {
             studentId,
             month,
             year,
-            amount: 20, // RECALIBRATED TO $20
+            amount: 20, // Standard fee amount: $20
             amountPaid: 0,
             status: 'UNPAID',
             datePaid: null
@@ -285,6 +341,61 @@ const Store = {
         if (index !== -1) {
             this.state.students[index] = { ...this.state.students[index], ...updatedData };
             this.logAction('Update Student', `Updated student ${updatedData.fullName}`, sessionStorage.getItem('dugsiga_user') ? JSON.parse(sessionStorage.getItem('dugsiga_user')).username : 'System');
+            this.saveToStorage();
+            return true;
+        }
+        return false;
+    },
+
+    deleteStudent(id) {
+        const index = this.state.students.findIndex(s => s.id === id);
+        if (index !== -1) {
+            const name = this.state.students[index].fullName;
+            this.state.students.splice(index, 1);
+            this.logAction('Delete Student', `Deleted student ${name}`, 'System');
+            this.saveToStorage();
+            return true;
+        }
+        return false;
+    },
+
+    // --- Teachers ---
+    getTeachers() {
+        return this.state.teachers || [];
+    },
+
+    addTeacher(teacher) {
+        const newTeacher = {
+            id: "TCH-" + Date.now().toString().slice(-6),
+            ...teacher,
+            status: 'Active',
+            joinDate: new Date().toISOString().split('T')[0]
+        };
+        if (!this.state.teachers) this.state.teachers = [];
+        this.state.teachers.push(newTeacher);
+        this.logAction('Add Teacher', `Added teacher ${newTeacher.name}`, 'System');
+        this.saveToStorage();
+        return newTeacher;
+    },
+
+    updateTeacher(updatedData) {
+        if (!this.state.teachers) return false;
+        const index = this.state.teachers.findIndex(t => t.id === updatedData.id);
+        if (index !== -1) {
+            this.state.teachers[index] = { ...this.state.teachers[index], ...updatedData };
+            this.logAction('Update Teacher', `Updated teacher ${updatedData.name}`, 'System');
+            this.saveToStorage();
+            return true;
+        }
+        return false;
+    },
+
+    deleteTeacher(id) {
+        if (!this.state.teachers) return false;
+        const index = this.state.teachers.findIndex(t => t.id === id);
+        if (index !== -1) {
+            this.state.teachers.splice(index, 1);
+            this.logAction('Delete Teacher', `Deleted teacher ${id}`, 'System');
             this.saveToStorage();
             return true;
         }
@@ -361,15 +472,39 @@ const Store = {
         this.saveToStorage();
     },
 
-    // --- Exams ---
-    getExamRecords(grade, section, subject, term) {
-        return this.state.exams.filter(e =>
-            e.grade === grade &&
-            e.section === section &&
-            e.subject === subject &&
-            e.term === term
-        );
+    // --- Exam Definitions (New) ---
+    getExams() {
+        return this.state.exams || [];
     },
+
+    addExam(exam) {
+        if (!this.state.exams) this.state.exams = [];
+        this.state.exams.push(exam);
+        this.logAction('Create Exam', `Created exam: ${exam.name}`, sessionStorage.getItem('dugsiga_user') ? JSON.parse(sessionStorage.getItem('dugsiga_user')).username : 'System');
+        this.saveToStorage();
+    },
+
+    updateExam(id, updates) {
+        const exam = this.state.exams.find(e => e.id === id);
+        if (exam) {
+            Object.assign(exam, updates);
+            this.logAction('Update Exam', `Updated exam: ${exam.name}`, sessionStorage.getItem('dugsiga_user') ? JSON.parse(sessionStorage.getItem('dugsiga_user')).username : 'System');
+            this.saveToStorage();
+        }
+    },
+
+    deleteExam(id) {
+        this.state.exams = this.state.exams.filter(e => e.id !== id);
+        this.logAction('Delete Exam', `Deleted exam ID: ${id}`, sessionStorage.getItem('dugsiga_user') ? JSON.parse(sessionStorage.getItem('dugsiga_user')).username : 'System');
+        this.saveToStorage();
+    },
+
+    // Legacy Exam Records (if needed, or can be adapted)
+    getExamRecords(grade, section, subject, term) {
+        // ... legacy logic, or just return empty
+        return [];
+    },
+
 
     saveExamScores(scores) {
         scores.forEach(newRecord => {
@@ -400,7 +535,7 @@ const Store = {
     seedData() {
         this.state.dataVersion = 5;
         this.state.settings = {
-            principalName: 'maxamed maxamed abdi',
+            principalName: 'abdulahi abdi',
             headTeachers: {
                 "Form 1": "Mr. Ahmed Nur",
                 "Form 2": "Ms. Fatima Farah",
@@ -429,17 +564,28 @@ const Store = {
         const DORMS = ["Dorm 1", "Dorm 2", "Dorm 3", "Dorm 4"];
         let idCounter = 1000;
 
+        const freeFeeDistribution = {
+            "Form 1": 3,
+            "Form 2": 3,
+            "Form 3": 5,
+            "Form 4": 4
+        };
+
         GRADES.forEach(grade => {
+            let freeRemaining = freeFeeDistribution[grade];
+
             SECTIONS.forEach(section => {
-                for (let i = 0; i < 20; i++) {
+                for (let i = 0; i < 15; i++) {
                     const fname = firstNames[Math.floor(Math.random() * firstNames.length)];
                     const lname = lastNames[Math.floor(Math.random() * lastNames.length)];
-
-                    // Assign dorms based on index to ensure even distribution
                     const dorm = DORMS[Math.floor(Math.random() * DORMS.length)];
 
-                    // Exactly 5 students per section are "Free Fee"
-                    const isFree = i < 5;
+                    // Assign free fee status based on distribution count
+                    let isFree = false;
+                    if (freeRemaining > 0) {
+                        isFree = true;
+                        freeRemaining--;
+                    }
 
                     const student = {
                         id: `STU-${idCounter++}`,
@@ -453,7 +599,9 @@ const Store = {
                         parentPhone: `615-${100000 + Math.floor(Math.random() * 900000)}`,
                         enrollmentDate: "2024-09-01",
                         isActive: true,
-                        performanceRemarks: i % 5 === 0 ? 'Excellent progress' : ''
+                        gender: Math.random() > 0.6 ? 'Female' : 'Male', // Slightly more males as per request (70/50 approx)
+                        status: 'Active',
+                        performanceRemarks: ''
                     };
                     this.state.students.push(student);
                 }
@@ -499,6 +647,56 @@ const Store = {
         });
 
         this.logAction('System', 'Database initialized with AL-Huda data version 4 (Dorms & Settings)');
+
+        // Seed Teachers
+        if (!this.state.teachers || this.state.teachers.length === 0) {
+            this.state.teachers = [
+                { id: 'KT001', name: 'Abdirahmaan Ali Aadan', phone: '+252613609678', gender: 'Male', salary: 300.00, subject: 'Mathematics' },
+                { id: 'KT002', name: 'Fardowsa Mohamed', phone: '+252615554321', gender: 'Female', salary: 280.00, subject: 'Science' },
+                { id: 'KT003', name: 'Hassan Omar', phone: '+252617778899', gender: 'Male', salary: 320.00, subject: 'English' },
+                { id: 'KT004', name: 'Amina Yussuf', phone: '+252612223344', gender: 'Female', salary: 300.00, subject: 'Islamic Studies' }
+            ];
+        }
+
+        // Seed Exams if empty
+        if (!this.state.exams || this.state.exams.length === 0) {
+            this.state.exams = [
+                {
+                    id: 'EXAM-001',
+                    name: 'Test Exam 2025-09-12 19:44:43',
+                    type: 'Teacher-based',
+                    term: 'Term 1',
+                    weight: 33.33,
+                    subjects: 3,
+                    students: 4,
+                    status: 'Open',
+                    date: '2025-09-12T19:44:43'
+                },
+                {
+                    id: 'EXAM-002',
+                    name: 'imtixaan',
+                    type: 'School Import',
+                    term: 'Final',
+                    weight: 100.00,
+                    subjects: 3,
+                    students: 3,
+                    status: 'Open',
+                    date: '2025-09-10T10:00:00'
+                },
+                {
+                    id: 'EXAM-003',
+                    name: 'Final Exam',
+                    type: 'Final',
+                    term: 'Final',
+                    weight: 100.00,
+                    subjects: 3,
+                    students: 0,
+                    status: 'Open',
+                    date: '2025-10-01T08:00:00'
+                }
+            ];
+        }
+
         this.saveToStorage();
     },
 

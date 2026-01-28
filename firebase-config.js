@@ -2,16 +2,15 @@
 // IMPORTANT: Replace these placeholder values with your actual Firebase project credentials
 // Follow the FIREBASE_SETUP_GUIDE.md for detailed instructions
 
-// Load config from window.APP_CONFIG (defined in config.js)
-// DO NOT EDIT THE BLOCK BELOW. It will automatically use the real keys from config.js.
+// Load config from window.APP_CONFIG (from config.js) or global defaults
 const firebaseConfig = window.APP_CONFIG?.FIREBASE || {
-    apiKey: "MISSING_CONFIG_JS_FILE", // This is only a backup. Real key is in config.js
-    authDomain: "PROJECT_NOT_SET",
-    projectId: "PROJECT_NOT_SET",
-    storageBucket: "PROJECT_NOT_SET",
-    messagingSenderId: "12345",
-    appId: "12345",
-    measurementId: "12345"
+    apiKey: "REMOVED_FOR_SECURITY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
+    messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+    appId: "YOUR_APP_ID",
+    measurementId: "YOUR_MEASUREMENT_ID"
 };
 window.firebaseConfig = firebaseConfig; // Expose for App.js check
 
